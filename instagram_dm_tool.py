@@ -1,63 +1,43 @@
 #!/usr/bin/env python3
 """
 instagram_dm_tool.py
-Instagram DM tool with PROPER PAGINATION using Instagram's cursor system.
+Modern Instagram DM Tool with Rich UI
 """
 
 import os
 import sys
 import json
 import time
+import webbrowser
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-# Check Python version
-if sys.version_info < (3, 6):
-    print("ERROR: Python 3.6 or higher required")
+# Rich Imports
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.prompt import Prompt, Confirm
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.markdown import Markdown
+    from rich import print as rprint
+except ImportError:
+    print("ERROR: 'rich' library not installed. Please install it:")
+    print("pip install rich")
     sys.exit(1)
 
 try:
     from instagrapi import Client
-    print("✓ instagrapi imported successfully")
-except ImportError as e:
-    print(f"ERROR: instagrapi not installed: {e}")
-    print("Install with: pip install instagrapi")
+except ImportError:
+    print("ERROR: 'instagrapi' not installed.")
+    print("pip install instagrapi")
     sys.exit(1)
+
+# Initialize Console
+console = Console()
 
 # Constants
 SESSION_FILE = "session.json"
-
-def get_password():
-    """Get password input"""
-    try:
-        import getpass
-        return getpass.getpass("Instagram password (hidden): ")
-    except Exception:
-        print("Note: Password will be visible")
-        return input("Instagram password: ")
-
-def load_session(client: Client, session_file: str) -> bool:
-    """Load session"""
-    if not os.path.exists(session_file):
-        return False
-    try:
-        client.load_settings(session_file)
-        client.account_info()
-        return True
-    except:
-        try:
-            os.remove(session_file)
-        except:
-            pass
-        return False
-
-def save_session(client: Client, session_file: str) -> bool:
-    """Save session"""
-    try:
-        client.dump_settings(session_file)
-        return True
-    except:
-        return False
 
 class IGDMTool:
     def __init__(self):
@@ -66,677 +46,551 @@ class IGDMTool:
         self.selected_thread_id = None
         self.my_username = None
         self.my_user_id = None
-        print("✓ IGDMTool initialized")
-    
+        self.last_matches = []
+        self.last_keywords = []
+
+    def _get_password(self):
+        """Get password input securely"""
+        return Prompt.ask("Instagram password", password=True)
+
+    def load_session(self) -> bool:
+        """Load session"""
+        if not os.path.exists(SESSION_FILE):
+            return False
+        try:
+            self.client.load_settings(SESSION_FILE)
+            self.client.account_info()
+            return True
+        except:
+            return False
+
+    def save_session(self) -> bool:
+        """Save session"""
+        try:
+            self.client.dump_settings(SESSION_FILE)
+            return True
+        except:
+            return False
+
     def login(self):
         """Login to Instagram"""
-        print("\n=== LOGIN ===")
+        console.print(Panel("Login to Instagram", style="bold blue"))
         
         # Try existing session
-        if load_session(self.client, SESSION_FILE):
+        if self.load_session():
             try:
                 user_info = self.client.account_info()
                 self.my_username = user_info.username
                 self.my_user_id = str(user_info.pk)
-                print(f"✓ Loaded session for: {self.my_username}")
+                console.print(f"[green]✓ Loaded session for: {self.my_username}[/green]")
                 self.logged_in = True
                 return True
             except:
-                print("Session invalid")
+                console.print("[yellow]Session invalid or expired.[/yellow]")
         
         # Fresh login
-        username = input("Instagram username: ").strip()
+        username = Prompt.ask("Instagram username")
         if not username:
             return False
         
-        password = get_password().strip()
+        password = self._get_password()
         if not password:
             return False
         
         try:
-            print("Logging in...")
-            self.client.login(username, password)
+            with console.status("[bold green]Logging in...[/bold green]"):
+                self.client.login(username, password)
+                
+                user_info = self.client.account_info()
+                self.my_username = user_info.username
+                self.my_user_id = str(user_info.pk)
+                
+                self.save_session()
             
-            user_info = self.client.account_info()
-            self.my_username = user_info.username
-            self.my_user_id = str(user_info.pk)
-            
-            save_session(self.client, SESSION_FILE)
-            print(f"✓ Logged in as: {self.my_username}")
+            console.print(f"[green]✓ Logged in as: {self.my_username}[/green]")
             self.logged_in = True
             return True
         except Exception as e:
-            print(f"Login failed: {e}")
+            console.print(f"[bold red]Login failed:[/bold red] {e}")
             return False
     
+    def analyze_source(self, item: Dict) -> str:
+        """Analyze message metadata to guess the source"""
+        client_context = item.get('client_context') or ''
+        
+        if not client_context:
+            return "Unknown"
+            
+        # Heuristic: Mobile apps usually use UUIDs (8-4-4-4-12 chars)
+        # Web/Bots often use long numeric strings (timestamps)
+        if len(client_context) > 20 and '-' in client_context:
+            return "Mobile App (Likely)"
+        elif client_context.isdigit():
+            return "Web/Bot (Likely)"
+        
+        return "Unknown"
+
+    def get_message_summary(self, item: Dict) -> str:
+        """Get string summary of message item including media types and IDs"""
+        item_type = item.get('item_type')
+        
+        if item_type == 'text':
+            return item.get('text', '')
+        
+        elif item_type == 'media':
+            media = item.get('media', {})
+            media_type = media.get('media_type')
+            media_id = media.get('id', '') or media.get('pk', '')
+            
+            suffix = f" ID:{media_id}" if media_id else ""
+            
+            if media_type == 1:
+                return f"[Photo{suffix}]"
+            elif media_type == 2:
+                return f"[Video{suffix}]"
+            return f"[Media{suffix}]"
+            
+        elif item_type == 'media_share':
+            media = item.get('media_share', {})
+            media_id = media.get('id', '') or media.get('pk', '')
+            suffix = f" ID:{media_id}" if media_id else ""
+            return f"[Post Share{suffix}]"
+            
+        # Other types
+        type_map = {
+            'voice_media': "[Voice Message]",
+            'like': "[Like]",
+            'raven_media': "[View Once Media]",
+            'clip': "[Reel]",
+            'placeholder': item.get('placeholder', {}).get('message', '[Placeholder]')
+        }
+        
+        if item_type in type_map:
+            return type_map[item_type]
+            
+        if item_type == 'link':
+            link_text = item.get('link', {}).get('text', '')
+            return f"[Link] {link_text}"
+            
+        return item.get('text') or f"[{item_type}]"
+
     def list_threads_raw_api(self):
-        """Use raw API call to get threads"""
+        """List threads with a Table"""
         if not self.logged_in:
-            print("Please login first")
+            console.print("[red]Please login first[/red]")
             return False
         
-        print("\n=== MESSAGE THREADS (RAW API) ===")
-        
         try:
-            print("Getting threads via raw API...")
-            
-            response = self.client.private_request("direct_v2/inbox/", params={
-                "visual_message_return_type": "unseen",
-                "thread_message_limit": "10",
-                "persistentBadging": "true",
-                "limit": "20"
-            })
+            with console.status("[bold cyan]Fetching threads...[/bold cyan]"):
+                response = self.client.private_request("direct_v2/inbox/", params={
+                    "visual_message_return_type": "unseen",
+                    "thread_message_limit": "2",
+                    "persistentBadging": "true",
+                    "limit": "20"
+                })
             
             if not response or 'inbox' not in response:
-                print("No inbox data received")
+                console.print("[red]No inbox data received[/red]")
                 return False
             
             inbox = response['inbox']
             threads = inbox.get('threads', [])
             
             if not threads:
-                print("No threads found")
+                console.print("[yellow]No threads found[/yellow]")
                 return False
             
-            print(f"Found {len(threads)} threads:")
-            print()
+            # Create Table
+            table = Table(title="Recent Conversations", show_header=True, header_style="bold magenta")
+            table.add_column("#", style="dim", width=4)
+            table.add_column("Users", style="cyan")
+            table.add_column("Last Message", style="white")
+            table.add_column("Thread ID", style="dim")
             
             for i, thread in enumerate(threads, 1):
                 try:
                     thread_id = thread.get('thread_id', 'Unknown')
-                    
-                    # Get usernames
                     users = thread.get('users', [])
-                    usernames = []
-                    for user in users[:3]:
-                        if 'username' in user:
-                            usernames.append(user['username'])
+                    usernames = [u['username'] for u in users[:3] if 'username' in u]
+                    users_str = ", ".join(usernames) if usernames else "Unknown"
                     
-                    users_str = ", ".join(usernames) if usernames else "Unknown users"
-                    
-                    # Get last message
                     items = thread.get('items', [])
                     last_msg = ""
                     if items:
-                        last_item = items[0]
-                        if 'text' in last_item and last_item['text']:
-                            last_msg = last_item['text'][:50]
-                            if len(last_item['text']) > 50:
-                                last_msg += "..."
-                        else:
-                            last_msg = "[Media/Other]"
+                        last_msg = self.get_message_summary(items[0])
+                        # Truncate
+                        if len(last_msg) > 40: last_msg = last_msg[:37] + "..."
                     
-                    print(f"{i:2d}. ID: {thread_id}")
-                    print(f"    Users: {users_str}")
-                    print(f"    Last: {last_msg}")
-                    print()
+                    table.add_row(str(i), users_str, last_msg, str(thread_id))
                     
-                except Exception as e:
-                    print(f"{i:2d}. [Error: {e}]")
+                except Exception:
                     continue
             
-            # Let user select
-            try:
-                choice = input("Select thread number (or Enter to cancel): ").strip()
-                if choice:
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(threads):
-                        self.selected_thread_id = threads[idx].get('thread_id')
-                        print(f"✓ Selected thread: {self.selected_thread_id}")
-                        return True
-                    else:
-                        print("Invalid selection")
-            except:
-                print("Invalid input")
+            console.print(table)
+            
+            choice = Prompt.ask("Select thread number", default="")
+            if choice and choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(threads):
+                    self.selected_thread_id = threads[idx].get('thread_id')
+                    console.print(f"[green]✓ Selected:[/green] {channels_str if 'channels_str' in locals() else 'Thread'} {self.selected_thread_id}")
+                    return True
             
             return False
             
         except Exception as e:
-            print(f"Failed to list threads: {e}")
+            console.print(f"[red]Error listing threads: {e}[/red]")
             return False
-    
-    def select_thread(self):
-        """Select thread by ID or username"""
-        if not self.logged_in:
-            print("Please login first")
-            return False
+
+    def fetch_threads_paginated(self, max_threads=100) -> List[Dict]:
+        """Fetch multiple pages of threads"""
+        all_threads = []
+        cursor = None
         
-        print("\n=== SELECT THREAD ===")
-        thread_input = input("Enter thread ID or username: ").strip()
-        if not thread_input:
-            return False
-        
-        try:
-            if thread_input.isdigit():
-                self.selected_thread_id = thread_input
-                print(f"✓ Selected thread ID: {thread_input}")
-                return True
-            else:
-                print(f"Looking up user: {thread_input}")
-                user_id = self.client.user_id_from_username(thread_input)
-                print(f"Found user ID: {user_id}")
-                
-                # Try to find thread via raw API
-                response = self.client.private_request("direct_v2/inbox/", params={
-                    "visual_message_return_type": "unseen",
-                    "thread_message_limit": "10",
-                    "persistentBadging": "true",
-                    "limit": "50"
-                })
-                
-                if response and 'inbox' in response:
-                    threads = response['inbox'].get('threads', [])
-                    for thread in threads:
-                        users = thread.get('users', [])
-                        for user in users:
-                            if str(user.get('pk', '')) == str(user_id):
-                                self.selected_thread_id = thread.get('thread_id')
-                                print(f"✓ Found thread: {self.selected_thread_id}")
-                                return True
-                
-                print("No thread found with that user")
-                return False
-        except Exception as e:
-            print(f"Failed to select thread: {e}")
-            return False
-    
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            transient=True
+        ) as progress:
+            task = progress.add_task(f"Fetching {max_threads} threads...", total=max_threads)
+            
+            while len(all_threads) < max_threads:
+                try:
+                    params = {
+                        "visual_message_return_type": "unseen",
+                        "thread_message_limit": "2",
+                        "limit": "20"
+                    }
+                    if cursor: params["cursor"] = cursor
+                    
+                    response = self.client.private_request("direct_v2/inbox/", params=params)
+                    inbox = response.get('inbox', {})
+                    threads = inbox.get('threads', [])
+                    
+                    if not threads: break
+                    
+                    all_threads.extend(threads)
+                    progress.update(task, advance=len(threads), description=f"fetched {len(all_threads)} threads")
+                    
+                    cursor = inbox.get('oldest_cursor')
+                    if not cursor: break
+                    
+                    time.sleep(0.5)
+                    if len(all_threads) >= max_threads: break
+                    
+                except Exception:
+                    break
+                    
+        return all_threads[:max_threads]
+
     def fetch_all_messages_paginated(self, max_messages=5000):
-        """Fetch messages with PROPER Instagram pagination using cursors"""
         all_messages = []
         cursor = None
         page = 1
-        consecutive_empty_pages = 0
+        consecutive_empty = 0
         
-        print(f"Fetching up to {max_messages} messages with PROPER pagination...")
-        
-        while len(all_messages) < max_messages and consecutive_empty_pages < 3:
-            try:
-                print(f"Fetching page {page}... (have {len(all_messages)} messages)")
-                
-                # Build params for pagination
-                params = {
-                    "visual_message_return_type": "unseen",
-                    "direction": "older",
-                    "limit": "75"  # Instagram's max per request
-                }
-                
-                # Add cursor for pagination if we have one
-                if cursor:
-                    params["cursor"] = cursor
-                
-                response = self.client.private_request(
-                    f"direct_v2/threads/{self.selected_thread_id}/", 
-                    params=params
-                )
-                
-                if not response or 'thread' not in response:
-                    print(f"No response data on page {page}")
-                    consecutive_empty_pages += 1
-                    if consecutive_empty_pages >= 3:
-                        break
-                    page += 1
-                    time.sleep(1)
-                    continue
-                
-                thread = response['thread']
-                items = thread.get('items', [])
-                
-                if not items:
-                    print(f"No items on page {page}")
-                    consecutive_empty_pages += 1
-                    if consecutive_empty_pages >= 3:
-                        print("No more messages found after 3 empty pages")
-                        break
-                    page += 1
-                    time.sleep(1)
-                    continue
-                
-                # Reset empty page counter since we got items
-                consecutive_empty_pages = 0
-                
-                # Add new messages
-                new_messages = 0
-                for item in items:
-                    if len(all_messages) >= max_messages:
-                        break
-                    all_messages.append(item)
-                    new_messages += 1
-                
-                print(f"Page {page}: Got {new_messages} messages")
-                
-                # Get cursor for next page from the response
-                # Instagram provides cursors in different places
-                cursor = None
-                
-                # Method 1: Check thread-level cursor
-                if 'oldest_cursor' in thread:
-                    cursor = thread['oldest_cursor']
-                    print(f"Using oldest_cursor: {cursor[:50]}...")
-                
-                # Method 2: Check if there's a next_cursor
-                elif 'next_cursor' in thread:
-                    cursor = thread['next_cursor']
-                    print(f"Using next_cursor: {cursor[:50]}...")
-                
-                # Method 3: Use the last item's timestamp as cursor
-                elif items:
-                    last_item = items[-1]
-                    if 'timestamp' in last_item:
-                        cursor = str(last_item['timestamp'])
-                        print(f"Using timestamp cursor: {cursor}")
-                
-                # Method 4: Check response-level pagination
-                elif 'paging_info' in response:
-                    paging = response['paging_info']
-                    if 'max_id' in paging:
-                        cursor = paging['max_id']
-                        print(f"Using max_id cursor: {cursor}")
-                
-                # If no cursor found, try to continue anyway
-                if not cursor and items:
-                    # Use last item ID as fallback
-                    last_item = items[-1]
-                    cursor = (last_item.get('item_id') or 
-                             last_item.get('id') or 
-                             last_item.get('client_context'))
-                    if cursor:
-                        print(f"Using fallback cursor: {cursor}")
-                
-                # If still no cursor, we might be at the end
-                if not cursor:
-                    print("No cursor found - might be at end of messages")
-                    # Try one more page without cursor
-                    if page == 1:
-                        page += 1
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+        ) as progress:
+            task = progress.add_task(f"Fetching messages...", total=None)
+            
+            while len(all_messages) < max_messages and consecutive_empty < 3:
+                try:
+                    params = {"visual_message_return_type": "unseen", "direction": "older", "limit": "75"}
+                    if cursor: params["cursor"] = cursor
+                    
+                    response = self.client.private_request(f"direct_v2/threads/{self.selected_thread_id}/", params=params)
+                    items = response.get('thread', {}).get('items', [])
+                    
+                    if not items:
+                        consecutive_empty += 1
                         time.sleep(1)
                         continue
-                    else:
+                        
+                    consecutive_empty = 0
+                    all_messages.extend(items)
+                    progress.update(task, description=f"Fetched {len(all_messages)} messages (Page {page})")
+                    
+                    # Pagination Logic
+                    thread = response.get('thread', {})
+                    cursor = thread.get('oldest_cursor') or thread.get('next_cursor')
+                    if not cursor and items:
+                        # Fallback to timestamp
+                        last = items[-1]
+                        cursor = last.get('timestamp')
+                        if not cursor:
+                            # Fallback to item_id
+                            cursor = last.get('item_id') or last.get('id')
+                            
+                    if not cursor:
+                        # Try one more just in case
+                        if page == 1: 
+                            page += 1
+                            continue
                         break
-                
-                page += 1
-                time.sleep(0.8)  # Slightly longer delay to avoid rate limits
-                
-            except Exception as e:
-                print(f"Error on page {page}: {e}")
-                consecutive_empty_pages += 1
-                if consecutive_empty_pages >= 3:
+                        
+                    page += 1
+                    time.sleep(0.5)
+                    
+                except Exception:
                     break
-                page += 1
-                time.sleep(2)  # Longer delay on error
-        
-        print(f"Total messages fetched: {len(all_messages)} across {page-1} pages")
-        return all_messages
-    
+                    
+        return all_messages[:max_messages]
+
     def view_messages_raw_api(self):
-        """View messages using raw API call"""
-        if not self.logged_in:
-            print("Please login first")
+        """View messages in a Table"""
+        if not self.logged_in: 
+            console.print("[red]Login required[/red]")
             return
-        
+
         if not self.selected_thread_id:
-            print("Please select a thread first")
-            return
+            if not self.list_threads_raw_api(): return
+
+        amount = int(Prompt.ask("Number of messages", default="20"))
+        show_raw = Confirm.ask("Show full raw JSON details?")
         
-        print(f"\n=== MESSAGES IN THREAD {self.selected_thread_id} ===")
-        
-        try:
-            amount = input("Number of messages (default 20): ").strip()
-            amount = int(amount) if amount.isdigit() else 20
-            
-            if amount > 75:
-                print(f"Using PROPER pagination to fetch {amount} messages...")
-                items = self.fetch_all_messages_paginated(amount)
-            else:
-                print(f"Fetching {amount} messages...")
+        items = []
+        if amount > 75:
+            items = self.fetch_all_messages_paginated(amount)
+        else:
+            with console.status("Fetching messages..."):
                 response = self.client.private_request(f"direct_v2/threads/{self.selected_thread_id}/", params={
-                    "visual_message_return_type": "unseen",
-                    "direction": "older",
-                    "limit": str(amount)
+                    "limit": str(amount), "direction": "older"
                 })
-                
-                if not response or 'thread' not in response:
-                    print("No thread data received")
-                    return
-                
-                items = response['thread'].get('items', [])
-            
-            if not items:
-                print("No messages found")
-                return
-            
-            print(f"\nFound {len(items)} messages (newest first):")
-            print("-" * 80)
-            
-            for item in items[:20]:  # Show first 20 for display
-                try:
-                    # Get message ID - try multiple fields
-                    msg_id = (item.get('item_id') or 
-                             item.get('id') or 
-                             item.get('client_context') or
-                             'Unknown')
-                    
-                    # Get text
-                    text = item.get('text', '[no text]')
-                    
-                    # Get sender
-                    user_id = item.get('user_id', 'Unknown')
-                    sender = f"ID:{user_id}"
-                    if str(user_id) == self.my_user_id:
-                        sender = f"{self.my_username} (YOU)"
-                    
-                    # Get timestamp
-                    timestamp = ""
-                    if 'timestamp' in item:
-                        try:
-                            ts = int(item['timestamp']) / 1000000  # Convert microseconds
-                            timestamp = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-                        except:
-                            timestamp = str(item['timestamp'])
-                    
-                    # Display
-                    display_text = text[:80] + "..." if len(text) > 80 else text
-                    
-                    print(f"ID: {msg_id}")
-                    print(f"From: {sender}")
-                    print(f"Time: {timestamp}")
-                    print(f"Text: {display_text}")
-                    print("-" * 40)
-                    
-                except Exception as e:
-                    print(f"Error displaying message: {e}")
-                    continue
-                
-        except Exception as e:
-            print(f"Failed to view messages: {e}")
-    
-    def search_messages_raw_api(self):
-        """Search messages using raw API with PROPER pagination"""
-        if not self.logged_in:
-            print("Please login first")
+                items = response.get('thread', {}).get('items', [])
+
+        if not items:
+            console.print("[yellow]No messages found.[/yellow]")
             return
+
+        # Render Table
+        table = Table(title=f"Messages in {self.selected_thread_id}", show_lines=True)
+        table.add_column("Date", style="dim", width=19)
+        table.add_column("From", style="cyan", width=15)
+        table.add_column("Source", style="magenta", width=10)
+        table.add_column("Content")
         
-        if not self.selected_thread_id:
-            print("Please select a thread first")
-            return
-        
-        print(f"\n=== SEARCH MESSAGES ===")
-        
-        keywords_input = input("Enter keywords (comma-separated): ").strip()
-        if not keywords_input:
-            print("No keywords provided")
-            return
-        
-        keywords = [k.strip().lower() for k in keywords_input.split(",") if k.strip()]
-        
-        try:
-            amount = input("Max messages to search (default 1000): ").strip()
-            amount = int(amount) if amount.isdigit() else 1000
-            
-            print(f"Searching for: {', '.join(keywords)}")
-            
-            # Use PROPER pagination
-            if amount > 75:
-                items = self.fetch_all_messages_paginated(amount)
-            else:
-                response = self.client.private_request(f"direct_v2/threads/{self.selected_thread_id}/", params={
-                    "visual_message_return_type": "unseen",
-                    "direction": "older",
-                    "limit": str(amount)
-                })
-                
-                if not response or 'thread' not in response:
-                    print("No thread data received")
-                    return
-                
-                items = response['thread'].get('items', [])
-            
-            if not items:
-                print("No messages found")
-                return
-            
-            matches = []
-            print(f"Scanning {len(items)} messages...")
-            
-            for i, item in enumerate(items, 1):
-                try:
-                    if i % 200 == 0:
-                        print(f"Scanned {i}/{len(items)}...")
-                    
-                    text = item.get('text', '')
-                    if not text:
-                        continue
-                    
-                    text_lower = text.lower()
-                    if any(keyword in text_lower for keyword in keywords):
-                        matches.append(item)
-                        
-                        # Get message details - try multiple ID fields
-                        msg_id = (item.get('item_id') or 
-                                 item.get('id') or 
-                                 item.get('client_context') or
-                                 'Unknown')
-                        
-                        user_id = item.get('user_id', 'Unknown')
-                        
-                        sender = f"ID:{user_id}"
-                        if str(user_id) == self.my_user_id:
-                            sender = f"{self.my_username} (YOU)"
-                        
-                        display_text = text[:100] + "..." if len(text) > 100 else text
-                        
-                        print(f"\n✓ MATCH #{len(matches)}")
-                        print(f"  ID: {msg_id}")
-                        print(f"  From: {sender}")
-                        print(f"  Text: {display_text}")
-                        
-                except Exception as e:
-                    print(f"Error processing message {i}: {e}")
-                    continue
-            
-            print(f"\n=== SEARCH COMPLETE ===")
-            print(f"Found {len(matches)} matches out of {len(items)} messages")
-            
-            # Store matches for potential deletion
-            self.last_matches = matches
-            self.last_keywords = keywords
-            
-        except Exception as e:
-            print(f"Search failed: {e}")
-    
-    def delete_messages_raw_api(self):
-        """UNSEND messages using proper Instagram API endpoint"""
-        if not self.logged_in:
-            print("Please login first")
-            return
-        
-        if not self.selected_thread_id:
-            print("Please select a thread first")
-            return
-        
-        print(f"\n=== UNSEND MESSAGES ===")
-        
-        # Check if we have recent search results
-        if not hasattr(self, 'last_matches') or not self.last_matches:
-            print("No recent search results. Please search for messages first (option 5).")
-            return
-        
-        matches = self.last_matches
-        keywords = self.last_keywords
-        
-        print(f"Found {len(matches)} messages matching: {', '.join(keywords)}")
-        
-        # Show what will be deleted
-        own_messages = []
-        other_messages = []
-        
-        for msg in matches:
-            user_id = msg.get('user_id', '')
-            if str(user_id) == self.my_user_id:
-                own_messages.append(msg)
-            else:
-                other_messages.append(msg)
-        
-        print(f"\nYour messages: {len(own_messages)}")
-        print(f"Other messages: {len(other_messages)}")
-        
-        if len(own_messages) == 0:
-            print("No messages from your account to unsend.")
-            return
-        
-        # Show messages that will be deleted
-        print(f"\nMessages that will be UNSENT:")
-        for i, msg in enumerate(own_messages[:10], 1):  # Show first 10
-            text = msg.get('text', '')
-            text = text[:50] + "..." if len(text) > 50 else text
-            
-            # Get proper message ID
-            msg_id = (msg.get('item_id') or 
-                     msg.get('id') or 
-                     msg.get('client_context') or
-                     'Unknown')
-            
-            print(f"{i:2d}. {msg_id}: {text}")
-        
-        if len(own_messages) > 10:
-            print(f"... and {len(own_messages) - 10} more")
-        
-        # Confirmation
-        confirm = input(f"\nType 'YES' to UNSEND {len(own_messages)} of your messages: ").strip()
-        if confirm != 'YES':
-            print("Unsend cancelled")
-            return
-        
-        # UNSEND messages using proper API endpoint
-        print(f"\nUnsending {len(own_messages)} messages...")
-        deleted = 0
-        failed = 0
-        
-        for i, msg in enumerate(own_messages, 1):
+        for item in items[:amount]: # Limit display if fetched many
             try:
-                # Try multiple ID fields
-                msg_id = (msg.get('item_id') or 
-                         msg.get('id') or 
-                         msg.get('client_context'))
+                ts = item.get('timestamp')
+                try:
+                    date_str = datetime.fromtimestamp(int(ts)/1000000).strftime("%Y-%m-%d %H:%M:%S")
+                except: date_str = str(ts)
                 
-                if not msg_id:
-                    print(f"[{i}/{len(own_messages)}] SKIP: No message ID found")
-                    failed += 1
-                    continue
+                user_id = str(item.get('user_id'))
+                sender = "YOU" if user_id == self.my_user_id else f"ID:{user_id}"
                 
-                print(f"[{i}/{len(own_messages)}] Unsending {msg_id}...", end=" ")
+                source = self.analyze_source(item)
+                text = self.get_message_summary(item)
                 
-                # Use the UNSEND endpoint (not delete)
-                response = self.client.private_request(
-                    f"direct_v2/threads/{self.selected_thread_id}/items/{msg_id}/delete/",
-                    data={
-                        "_uuid": self.client.uuid,
-                        "_uid": self.my_user_id,
-                        "_csrftoken": self.client.token
-                    },
-                    with_signature=False
-                )
+                table.add_row(date_str, sender, source, text)
                 
-                if response and response.get('status') == 'ok':
-                    print("✓")
-                    deleted += 1
-                else:
-                    # Try alternative unsend endpoint
-                    response2 = self.client.private_request(
-                        "direct_v2/threads/broadcast/item_unsend/",
-                        data={
-                            "thread_id": self.selected_thread_id,
-                            "item_id": msg_id,
-                            "_uuid": self.client.uuid,
-                            "_uid": self.my_user_id,
-                            "_csrftoken": self.client.token
-                        },
+                if show_raw:
+                    clean = item.copy()
+                    if 'xma_share' in clean: clean['xma_share'] = '<truncated>'
+                    console.print(Panel(json.dumps(clean, indent=2), title="Raw JSON", style="dim"))
+            except: pass
+            
+        console.print(table)
+
+    def bulk_unsend_all_threads(self):
+        """Bulk unsend with progress bars"""
+        if not self.logged_in: return
+
+        console.print(Panel("BULK UNSEND - Scan multiple conversations and delete matches", style="bold red"))
+        
+        keywords_str = Prompt.ask("Keywords/IDs to match")
+        if not keywords_str: return
+        keywords = [k.strip().lower() for k in keywords_str.split(",") if k.strip()]
+        
+        max_threads = int(Prompt.ask("Max threads to scan", default="50"))
+        msgs_per_thread = int(Prompt.ask("Messages per thread", default="20"))
+        
+        threads = self.fetch_threads_paginated(max_threads)
+        
+        matches = []
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as progress:
+            scan_task = progress.add_task("Scanning for matches...", total=len(threads))
+            
+            for thread in threads:
+                progress.advance(scan_task)
+                t_id = thread.get('thread_id')
+                users = thread.get('users', [])
+                name = users[0].get('username') if users else "Unknown"
+                
+                items = thread.get('items', [])
+                for item in items[:msgs_per_thread]:
+                    if str(item.get('user_id')) != self.my_user_id: continue
+                    
+                    summary = self.get_message_summary(item)
+                    if any(k in summary.lower() for k in keywords):
+                        matches.append({
+                            "thread_id": t_id,
+                            "thread_name": name,
+                            "msg": item,
+                            "summary": summary
+                        })
+        
+        console.print(f"\n[bold green]Found {len(matches)} matching messages.[/bold green]")
+        if not matches: return
+        
+        # Preview
+        preview_table = Table(title="Preview Matches", show_header=False)
+        for m in matches[:5]:
+            preview_table.add_row(f"To [cyan]{m['thread_name']}[/cyan]: {m['summary']}")
+        console.print(preview_table)
+        if len(matches) > 5: console.print(f"... and {len(matches)-5} more")
+        
+        if not Confirm.ask(f"[bold red]Unsend {len(matches)} messages?[/bold red]"):
+            console.print("Cancelled.")
+            return
+            
+        # Delete loop
+        with Progress(TextColumn("{task.description}"), SpinnerColumn()) as progress:
+            del_task = progress.add_task("Deleting...", total=len(matches))
+            deleted = 0
+            
+            for m in matches:
+                try:
+                    t_id = m['thread_id']
+                    msg = m['msg']
+                    msg_id = msg.get('item_id') or msg.get('id')
+                    
+                    progress.update(del_task, description=f"Unsending from {m['thread_name']}...")
+                    
+                    self.client.private_request(
+                        f"direct_v2/threads/{t_id}/items/{msg_id}/delete/",
+                        data={"_uuid": self.client.uuid, "_uid": self.my_user_id},
                         with_signature=False
                     )
-                    
-                    if response2 and response2.get('status') == 'ok':
-                        print("✓ (alt)")
-                        deleted += 1
-                    else:
-                        print("✗")
-                        failed += 1
-                
-                # Small delay between deletions
-                time.sleep(1)
-                
-            except Exception as e:
-                print(f"✗ Error: {e}")
-                failed += 1
+                    deleted += 1
+                    progress.advance(del_task)
+                    time.sleep(1.5)
+                except Exception:
+                    time.sleep(2)
         
-        print(f"\n=== UNSEND COMPLETE ===")
-        print(f"Unsent: {deleted}")
-        print(f"Failed: {failed}")
-        
-        # Clear search results
-        self.last_matches = []
-    
-    def menu_loop(self):
-        """Main menu"""
-        while True:
-            try:
-                print("\n" + "=" * 50)
-                print("INSTAGRAM DM TOOL - UNLIMITED PAGINATION")
-                print("=" * 50)
-                
-                if self.logged_in:
-                    print(f"Logged in as: {self.my_username}")
-                else:
-                    print("Not logged in")
-                
-                if self.selected_thread_id:
-                    print(f"Selected thread: {self.selected_thread_id}")
-                
-                print("\nOptions:")
-                print("1. Login")
-                print("2. List Threads (Raw API)")
-                print("3. Select Thread (by ID/username)")
-                print("4. View Messages (Unlimited)")
-                print("5. Search Messages (Unlimited)")
-                print("6. Unsend Messages (Working)")
-                print("7. Exit")
-                
-                choice = input("\nSelect option (1-7): ").strip()
-                
-                if choice == "1":
-                    self.login()
-                elif choice == "2":
-                    self.list_threads_raw_api()
-                elif choice == "3":
-                    self.select_thread()
-                elif choice == "4":
-                    self.view_messages_raw_api()
-                elif choice == "5":
-                    self.search_messages_raw_api()
-                elif choice == "6":
-                    self.delete_messages_raw_api()
-                elif choice == "7":
-                    print("Goodbye!")
-                    break
-                else:
-                    print("Invalid option")
-                    
-            except KeyboardInterrupt:
-                print("\n\nGoodbye!")
-                break
-            except Exception as e:
-                print(f"\nMenu error: {e}")
+        console.print(f"[bold green]Done. Unsent {deleted} messages.[/bold green]")
 
-def main():
+    def check_login_activity(self):
+        """Show login activity in a Table"""
+        if not self.logged_in: return
+        
+        with console.status("Fetching login activity..."):
+            try:
+                try:
+                    result = self.client.private_request("accounts/login_activity/")
+                except:
+                    result = self.client.private_request("session/login_activity/")
+                
+                sessions = result.get('active_sessions') or result.get('sessions') or []
+                suspicious = result.get('suspicious_logins', [])
+                
+                table = Table(title="Login Activity", show_lines=True)
+                table.add_column("Device", style="cyan")
+                table.add_column("Location", style="yellow")
+                table.add_column("IP")
+                table.add_column("Time", style="dim")
+                table.add_column("Status")
+                
+                for s in sessions:
+                    ts = s.get('timestamp')
+                    t_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M') if ts else "?"
+                    is_current = "[bold green]THIS DEVICE[/bold green]" if s.get('is_current') else "Active"
+                    
+                    table.add_row(
+                        s.get('device', '?'),
+                        s.get('location', '?'),
+                        s.get('ip_address', '?'),
+                        t_str,
+                        is_current
+                    )
+                
+                for s in suspicious:
+                    ts = s.get('timestamp')
+                    t_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M') if ts else "?"
+                    table.add_row(
+                        s.get('device', '?'),
+                        s.get('location', '?'),
+                        s.get('ip_address', '?'),
+                        t_str,
+                        "[bold red]BLOCKED[/bold red]"
+                    )
+                    
+                console.print(table)
+                
+            except Exception as e:
+                console.print(f"[red]Failed to get activity: {e}[/red]")
+
+    def print_security_checklist(self):
+        """Security advice Markdown"""
+        md = """
+# CRITICAL SECURITY ADVICE
+
+**BASED ON YOUR SITUATION:**
+The message you found had a 'Web/Automation' source.
+This strongly suggests a **Third-Party App** or **Bot Service** has your credential.
+Examples: 'Follower Trackers', 'Story Downloaders', or 'Auto-Liker' services.
+
+## IMMEDIATE ACTIONS
+
+1. **[CRITICAL] CHANGE YOUR PASSWORD NOW.**
+   - This is the ONLY way to instantly log out all other people/bots.
+   
+2. **[CRITICAL] ENABLE 2-FACTOR AUTHENTICATION.**
+   - Use an Authenticator App (like Google Auth), NOT just SMS.
+
+3. **Revoke 'Apps and Websites' Permissions.**
+   - Settings -> Security -> Apps and Websites.
+   - Remove anything active that you don't 100% trust.
+"""
+        console.print(Markdown(md))
+        
+        if Confirm.ask("Open Password Settings in Browser?"):
+             webbrowser.open("https://www.instagram.com/accounts/password/change/")
+             
+        if Confirm.ask("Open 2FA Settings?"):
+            webbrowser.open("https://www.instagram.com/accounts/two_factor_authentication/")
+            
+        if Confirm.ask("Open Apps/Websites Settings?"):
+            webbrowser.open("https://www.instagram.com/accounts/manage_access/")
+
+    def menu_loop(self):
+        while True:
+            console.print("\n")
+            console.rule("[bold magenta]INSTAGRAM DM TOOL[/bold magenta]")
+            
+            if self.logged_in:
+                console.print(f"[dim]Logged in as: [cyan]{self.my_username}[/cyan][/dim]")
+            
+            options = {
+                "1": "Login",
+                "2": "Bulk Unsend (All Threads)",
+                "3": "View Login Activity",
+                "4": "View Messages (Debug Mode)",
+                "5": "Security Advice",
+                "6": "Exit"
+            }
+            
+            for k, v in options.items():
+                console.print(f"[bold cyan]{k}.[/bold cyan] {v}")
+            
+            choice = Prompt.ask("Select option", choices=list(options.keys()))
+            
+            if choice == "1": self.login()
+            elif choice == "2": self.bulk_unsend_all_threads()
+            elif choice == "3": self.check_login_activity()
+            elif choice == "4": self.view_messages_raw_api()
+            elif choice == "5": self.print_security_checklist()
+            elif choice == "6": 
+                console.print("[green]Goodbye![/green]")
+                break
+
+if __name__ == "__main__":
     try:
-        print("Instagram DM Tool - UNLIMITED PAGINATION + WORKING UNSEND")
-        print("✓ Proper cursor-based pagination")
-        print("✓ Can fetch 1000s of messages")
-        print("✓ Working unsend functionality")
         tool = IGDMTool()
         tool.menu_loop()
     except KeyboardInterrupt:
-        print("\n\nGoodbye!")
+        console.print("\n[yellow]Goodbye![/yellow]")
     except Exception as e:
-        print(f"Error: {e}")
-
-if __name__ == "__main__":
-    main()
+        console.print(f"[red]Fatal Error: {e}[/red]")
