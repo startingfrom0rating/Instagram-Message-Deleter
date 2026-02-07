@@ -1,0 +1,14 @@
+# Sensitive Session Data - NEVER PUBLISH
+session.json
+
+# Python temporary files
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+env/
+
+# System files
+.DS_Store
+Thumbs.db
