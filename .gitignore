@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Instagram session data (protect credentials/cookies)
+session.json
+*.session
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
