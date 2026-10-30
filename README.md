@@ -2,10 +2,11 @@
 
 A Python tool using [instagrapi](https://github.com/subzeroid/instagrapi) to:
 - Log in to Instagram with session persistence (supports Username/Password, 2FA, and Browser Session ID)
-- List and select DM conversations
-- View unlimited messages (cursor-based pagination)
-- Search and filter messages by **All Messages**, **Keywords**, **Photos & Media**, or **Links & URLs**
-- **Bulk unsend** your own messages, scam links, photos, and media
+- **Account-Wide Cleanup:** Scan across **ALL conversations in your inbox** and bulk unsend scam links, photos, and messages with 1 click
+- Browse and scroll through your entire inbox history with interactive Next-Page pagination
+- View unlimited messages in any thread with proper cursor-based pagination
+- Search and filter messages by **All Messages**, **Keywords**, **Photos & Media**, **Links & URLs**, or **Recent Date Range**
+- **Bulk unsend** your own messages, scam links, photos, videos, and disappearing snaps
 
 ---
 
@@ -125,13 +126,14 @@ This tool needs `instagrapi` to connect to Instagram. Make sure you install or u
 
    Options:
    1. Login / Account (Username/Password or Session ID Cookie)
-   2. List Conversations (Raw API)
+   2. List Conversations (Browse Inbox with Next-Page pagination)
    3. Select Conversation (by Username or Thread ID)
-   4. View Messages (Unlimited pagination)
-   5. Search / Filter Messages (All, Keywords, Photos, Links)
-   6. Unsend Queued Messages (Working)
-   7. Logout / Switch Account
-   8. Exit
+   4. View Messages (Unlimited pagination in selected conversation)
+   5. Search / Filter Messages (In selected conversation)
+   6. Unsend Queued Messages (In selected conversation)
+   7. CLEAN ALL CONVERSATIONS (Account-Wide Scam Unsend) [NEW]
+   8. Logout / Switch Account
+   9. Exit
    ```
 
 ---
@@ -163,95 +165,82 @@ Your session is automatically saved to `session.json` so you stay logged in betw
 
 ---
 
-### Step 6: Select a Conversation
+### Step 6: Account-Wide Scam Cleanup (Option 7 - RECOMMENDED FOR HACKED ACCOUNTS)
 
-You have two ways to pick the conversation you want to clean up:
+> [!IMPORTANT]
+> If your account was hacked and the scammer messaged **many people or everyone in your inbox**, use **Option 7**!
+> You do **not** need to manually select or scroll through conversations one by one!
 
-#### Option A: List Recent Conversations
-1. Type `2` and press Enter.
-2. You will see a numbered list of your conversations with user names and latest message previews.
-3. Type the number corresponding to the conversation and press Enter.
-
-#### Option B: Select by Username
-1. Type `3` and press Enter.
-2. Type the Instagram username of the person whose conversation you want to open.
-3. Press Enter.
+1. Select **Option 7: CLEAN ALL CONVERSATIONS (Account-Wide Scam Unsend)**.
+2. **Choose how many conversations to scan:**
+   - 1. Recent 25 conversations
+   - 2. Recent 50 conversations
+   - 3. Recent 100 conversations
+   - 4. **ALL conversations in inbox (Full inbox scan)**
+3. **Choose what to unsend:**
+   - **1. ALL messages & media sent by you:** Unsends everything your account sent.
+   - **2. Only Links & URLs:** Unsends all scam websites and links.
+   - **3. Only Photos & Videos:** Unsends all scam photos, disappearing snaps, and media.
+   - **4. Keywords:** Unsends messages containing words like `vote,link,gift,crypto`.
+4. **Choose Date Range (Protects your older messages):**
+   - Enter `3` or `7` to only delete messages sent in the last 3 or 7 days during the hack.
+   - Or press Enter to scan all time.
+5. Review the summary of found messages across all conversations.
+6. Type `YES` to confirm. The tool will unsend all of them automatically across every conversation!
 
 ---
 
-### Step 7: Filter & Bulk Unsend Messages
+### Step 7: Cleaning a Single Conversation (Options 2, 5, 6)
 
-#### Step 7.1: Filter Messages to Unsend
+If you only need to clean up a specific conversation:
+
+#### Step 7.1: Select the Conversation
+- **Option 2 (Browse Inbox):** Lists conversations 20 at a time. Type `N` to load the next 20 conversations and scroll down through your inbox, or enter the number of the conversation to select it.
+- **Option 3 (Select by Username):** Enter the Instagram username directly.
+
+#### Step 7.2: Filter Messages
 1. Type `5` and press Enter (**Search / Filter Messages**).
-2. Choose what you want to target:
-   - **1. ALL messages sent by you:** Unsend every single message, link, and photo sent from your account in this conversation (best for cleaning up after being hacked).
-   - **2. Search by keyword(s):** Target specific words (e.g. `scam,crypto,gift,http`).
-   - **3. Only Photos & Videos:** Targets all photos, videos, disappearing snaps, and shared media sent by you.
-   - **4. Only Links & URLs:** Targets all scam links and websites sent by you.
-3. Enter how many messages in the chat history to scan (default is 1000).
-4. The tool scans backwards using cursor pagination and displays all matching messages.
+2. Choose:
+   - `1` for all messages sent by you.
+   - `2` for keywords.
+   - `3` for photos & videos.
+   - `4` for links & URLs.
+3. Enter how many messages in the chat history to scan (e.g. `1000`, `5000`, or more). The tool uses proper cursor pagination to traverse older message history.
 
-#### Step 7.2: Unsend the Messages
+#### Step 7.3: Unsend
 1. Type `6` and press Enter (**Unsend Queued Messages**).
-2. The tool displays:
-   - How many messages from your account will be unsent.
-   - A breakdown of texts, photos/media, and links.
-   - A preview of the first 10 messages.
-   - Confirmation that messages sent by other participants are safe and will *not* be deleted.
-3. Type `YES` (in capital letters) to confirm.
-4. The tool unsends each message one by one with a built-in 1-second delay to protect your account from spam detection.
+2. Type `YES` to confirm.
 
 ---
 
 ## 🎯 Common Use Cases
 
-### Recovering from a Hacked Account (Unsend Scam Links & Photos)
+### Recovering from a Hacked Account (Account-Wide Cleanup)
 1. Log in using your browser's **Session ID** (Option 1 -> Method 2).
-2. Select the conversation (Option 2 or 3).
-3. Select **Option 5** -> choose **1** (ALL messages sent by you) or **4** (Only Links & URLs) or **3** (Only Photos & Videos).
-4. Enter `5000` to scan through the full chat history.
-5. Select **Option 6**, type `YES`, and let the tool unsend all the scam content!
-
-### Delete All Messages in a Conversation
-1. Select the conversation (Option 2 or 3).
-2. Select **Option 5** -> **1. ALL messages sent by you**.
-3. Enter a high number like `5000` or `10000`.
-4. Select **Option 6** and type `YES`.
-
-### Delete Specific Keywords Only
-1. Select the conversation (Option 2 or 3).
-2. Select **Option 5** -> **2. Search by keyword(s)**.
-3. Enter comma-separated keywords (e.g. `password,secret,embarrassing`).
-4. Select **Option 6** and confirm.
+2. Select **Option 7 (CLEAN ALL CONVERSATIONS)**.
+3. Choose `4` (ALL conversations in inbox) or `3` (100 conversations).
+4. Choose `1` (ALL messages sent by you) or `2` (Links & URLs) or `3` (Photos & Videos).
+5. (Optional) Enter `3` for the last 3 days to protect older personal chats.
+6. Confirm with `YES` and let the tool automatically unsend all scam content from all chats!
 
 ---
 
 ## ❓ FAQ & Troubleshooting
 
 ### Problem: "Your version of Instagram is out of date. Please upgrade your app to log in to Instagram." (`needs_upgrade`)
-**Why this happens:**
-Instagram's servers periodically deprecate older mobile app client signatures or flag third-party password logins from accounts/IPs that recently experienced suspicious activity (like being compromised or having a password changed).
+**Solution:**
+Use **Session ID Cookie Login** (Option 1 -> Method 2). Browser cookies bypass mobile app client version deprecations and checkpoint challenges completely.
 
-**How to resolve it:**
-1. **Best & Instant Solution:** Use **Session ID Cookie Login**!
-   - In the tool, choose **Option 1 -> Method 2**.
-   - Copy your `sessionid` cookie from your browser where you are logged in to [instagram.com](https://www.instagram.com) (press F12 -> Application -> Cookies -> `sessionid`).
-   - Web sessions are immune to mobile client version checks.
-2. **Upgrade instagrapi:**
-   Make sure you have the newest version of `instagrapi` installed:
-   ```bash
-   pip install --upgrade instagrapi
-   ```
+### Problem: "It only scans through head history not the whole sent messages"
+**Solution:**
+The latest update includes:
+1. **Option 7 (Account-Wide Cleanup):** Paginates through your entire inbox and cleans all conversations automatically.
+2. **Inbox Pagination (Option 2):** Type `N` to page down through older conversations in your inbox.
+3. **Deep Thread Pagination (Option 4 & 5):** Fixed cursor pagination parameters (`seq_id="40065"`, `limit="20"`, `oldest_cursor`, and `MINCURSOR` detection) so searching deeply within a conversation can load thousands of older messages.
 
 ### Problem: Two-Factor Authentication (2FA) is enabled
 **Solution:**
-You do **not** need to disable 2FA!
-- When logging in with Username & Password (Method 1), the tool will detect 2FA and prompt you for your 6-digit code.
-- Alternatively, logging in via **Session ID** (Method 2) bypasses 2FA prompts entirely.
-
-### Problem: "UnicodeEncodeError: 'charmap' codec can't encode character" on Windows
-**Solution:**
-The latest update uses universal ASCII indicators (`[+]`, `[!]`, `[-]`) and automatically configures UTF-8 output on Windows consoles, preventing character encoding crashes.
+You do **not** need to disable 2FA! The tool prompts for your 6-digit verification code, or you can log in with Session ID (Method 2) to bypass 2FA entirely.
 
 ### Q: Will this delete the other person's messages?
 **A:** No. Instagram only allows unsending messages sent by your own account. The tool automatically protects and ignores messages sent by other chat participants.
